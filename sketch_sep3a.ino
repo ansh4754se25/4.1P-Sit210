@@ -4,151 +4,142 @@
 BH1750 lightMeter;
 
 // Pin connections
-const int pirPin = 2;
-const int buttonPin = 5;
+const int pirPin = 3;
+const int buttonPin = 2;
 
-const int led1 = 3;
-const int led2 = 4;
+const int led1 = 4;
+const int led2 = 5;
 
-// Darkness threshold
+// Light level below 50 lux is considered dark
 const float darknessThreshold = 50.0;
 
-// Automatic light duration
-const unsigned long lightDuration = 10000;
-
-// PIR interrupt flag
+// Interrupt flags
 volatile bool motionDetected = false;
+volatile bool buttonPressed = false;
 
-// Light status
+// Current LED state
 bool lightsOn = false;
 
-// Button mode
-bool manualMode = false;
+// Used for button debounce
+unsigned long lastButtonTime = 0;
 
-unsigned long lastLightTime = 0;
-
-
-// PIR Interrupt
+// PIR interrupt
 void motionInterrupt() {
   motionDetected = true;
 }
 
+// Button interrupt
+void buttonInterrupt() {
+  buttonPressed = true;
+}
 
-// Turn both lights ON
-void turnLightsOn(String reason) {
-
+// Turn both LEDs ON
+void turnLightsOn() {
   digitalWrite(led1, HIGH);
   digitalWrite(led2, HIGH);
-
   lightsOn = true;
-
-  Serial.println(reason);
 }
 
-
-// Turn both lights OFF
-void turnLightsOff(String reason) {
-
+// Turn both LEDs OFF
+void turnLightsOff() {
   digitalWrite(led1, LOW);
   digitalWrite(led2, LOW);
-
   lightsOn = false;
-
-  Serial.println(reason);
 }
 
-
 void setup() {
-
+  // Start Serial Monitor
   Serial.begin(9600);
 
-  // LED pins
+  // Configure LEDs
   pinMode(led1, OUTPUT);
   pinMode(led2, OUTPUT);
 
-  // PIR sensor
+  // Start with lights OFF
+  turnLightsOff();
+
+  // Configure PIR sensor
   pinMode(pirPin, INPUT);
 
-  // Push button
+  // Configure button using internal pull-up resistor
   pinMode(buttonPin, INPUT_PULLUP);
 
   // Start BH1750
   Wire.begin();
-  lightMeter.begin();
 
-  // Attach PIR interrupt
+  if (lightMeter.begin()) {
+    Serial.println("BH1750 started");
+  } else {
+    Serial.println("BH1750 not detected");
+  }
+
+  // Enable PIR interrupt
   attachInterrupt(
     digitalPinToInterrupt(pirPin),
     motionInterrupt,
     RISING
   );
 
+  // Enable button interrupt
+  attachInterrupt(
+    digitalPinToInterrupt(buttonPin),
+    buttonInterrupt,
+    FALLING
+  );
+
   Serial.println("System Started");
+  Serial.println("Waiting for motion or button...");
 }
 
-
 void loop() {
-
-  // Read light level
+  // Read the current light level
   float lightLevel = lightMeter.readLightLevel();
 
-
-  // -------------------------
-  // PIR Automatic System
-  // -------------------------
+  // Handle PIR interrupt
   if (motionDetected) {
-
     motionDetected = false;
 
-    // Only activate if it is dark
-    if (lightLevel < darknessThreshold && !manualMode) {
+    Serial.println("Motion detected");
 
-      turnLightsOn("Motion detected in darkness - Lights ON");
+    // Automatically turn lights ON only when it is dark
+    if (lightLevel < darknessThreshold) {
+      turnLightsOn();
 
-      // Start automatic timer
-      lastLightTime = millis();
+      Serial.print("It is dark: ");
+      Serial.print(lightLevel);
+      Serial.println(" lux");
 
-    } else if (lightLevel >= darknessThreshold) {
-
-      Serial.println("Motion detected but it is bright");
-    }
-  }
-
-
-  // -------------------------
-  // Manual Push Button
-  // -------------------------
-  if (digitalRead(buttonPin) == LOW) {
-
-    // Toggle manual mode
-    manualMode = !manualMode;
-
-    if (manualMode) {
-
-      turnLightsOn("Button pressed - Lights ON");
-
+      Serial.println("Lights ON");
     } else {
+      Serial.print("It is bright: ");
+      Serial.print(lightLevel);
+      Serial.println(" lux");
 
-      turnLightsOff("Button pressed - Lights OFF");
+      Serial.println("Lights remain OFF");
     }
-
-
-    // Wait until button is released
-    while (digitalRead(buttonPin) == LOW) {
-      delay(10);
-    }
-
-    delay(50); // Debounce
   }
 
+  // Handle button interrupt
+  if (buttonPressed) {
+    buttonPressed = false;
 
-  // -------------------------
-  // Automatic Timer
-  // -------------------------
-  if (lightsOn &&
-      !manualMode &&
-      millis() - lastLightTime >= lightDuration) {
+    // Wait for button bouncing to settle
+    if (millis() - lastButtonTime > 200) {
 
-    turnLightsOff("Automatic timer - Lights OFF");
+      // Make sure the button is actually pressed
+      if (digitalRead(buttonPin) == LOW) {
+
+        // Toggle both LEDs
+        if (lightsOn) {
+          turnLightsOff();
+          Serial.println("Button pressed - Lights OFF");
+        } else {
+          turnLightsOn();
+          Serial.println("Button pressed - Lights ON");
+        }
+
+        lastButtonTime = millis();
+      }
+    }
   }
 }
